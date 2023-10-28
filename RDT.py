@@ -2,6 +2,7 @@ import Network
 import argparse
 from time import sleep
 import hashlib
+import time
 
 
 class Packet:
@@ -201,10 +202,113 @@ class RDT:
             self.byte_buffer = self.byte_buffer[length:]
 
     def rdt_3_0_send(self, msg_S):
-        pass
+        # 最大等待时间
+        time_limit = 1
+        # 先创建一个报文并发送
+        send_pkt = Packet(self.seq_num, msg_S)
+
+        # 循环直到期望的序号改变
+        while True:
+            # 无条件发送报文，直到进入下一个状态跳出循环
+            self.network.udt_send(send_pkt.get_byte_S())
+            print("##########\nSent a packet %d, waiting for response\n" %self.seq_num)
+
+            self.byte_buffer = ''
+            receive_pkt = ''
+
+            # 开始计时
+            start_time = time.time()
+            end_time = time.time()
+
+            # 然后等待接受接收方发过来的ACK或NAK报文（可能有比特差错）
+            while receive_pkt == '' and end_time - start_time < time_limit:
+                receive_pkt = self.network.udt_receive()
+                end_time = time.time()
+            
+            # 超时了，重发
+            if receive_pkt == '':
+                print("!!!!!!!!!!\nTimeout, nothing received ,resending packet \n!!!!!!!!!!\n")
+                continue
+
+            # 接受报文的长度
+            pkt_length = int(receive_pkt[:Packet.length_S_length])
+            self.byte_buffer = receive_pkt
+
+            pRec = Packet.from_byte_S(self.byte_buffer[:pkt_length])
+
+            # 检查是否出错
+            if pRec == None:
+                self.byte_buffer = ''
+                print("@@@@@@@@@@\nReceived corrupt packet, resending the packet\n@@@@@@@@@@\n")
+                continue
+            # 没有出错
+            else:
+                if pRec.seq_num < self.seq_num:
+                    ack_packet = Packet(pRec.seq_num, "1")
+                    print("**********\nSending ACK %d for duplicate packet\n**********\n" %pRec.seq_num)
+                    self.network.udt_send(ack_packet.get_byte_S())
+                
+                # notcorruot && isACK,则可以进入下一个状态
+                if pRec.msg_S == '1':
+                    print("##########\nreceived right ACK %d, move to next state\n" %pRec.seq_num)
+                    self.seq_num += 1
+                    break
+                elif pRec.msg_S == '0':
+                    print("##########\nreceived wrong ACK %d, resending the packet\n" %pRec.seq_num)
+                    continue
+
+                else:
+                    print("##########\nReceived a normal packet %d\n" %pRec.seq_num)
         
     def rdt_3_0_receive(self):
-        pass
+        ret_S = None
+        # 首先接受一个报文,将其存入buffer
+        byte_S = self.network.udt_receive()
+        self.byte_buffer += byte_S
+
+        while True:
+            # 如果没有接受足够长的字节，则返回None
+            if(len(self.byte_buffer) < Packet.length_S_length):
+                return ret_S
+            
+            length = int(self.byte_buffer[:Packet.length_S_length])
+            if len(self.byte_buffer) < length:
+                return ret_S
+            
+            # 获取接受报文，如果接受报文有错，则p为None
+            p = Packet.from_byte_S(self.byte_buffer[0:length])
+
+            # 接受报文损坏了，发送NAK
+            if (p == None):
+                print("@@@@@@@@@@\nReceived a Corrupt packet,about to respond\n@@@@@@@@@@\n")
+                print("################\nSending wrong ACK %d\n" %self.seq_num)
+                pak = Packet(self.seq_num, "0")
+                self.network.udt_send(pak.get_byte_S())
+
+            else:
+                # 这是send为了处理冗余报文发送的ACK，接收方不管
+                if p.msg_S == '0' or p.msg_S == '1':
+                    # print('##########\nReceived a dupilicate ACK packet,ignore\n')
+                    self.byte_buffer = self.byte_buffer[length:]
+                    continue
+                
+                # 已经接受过的报文，重发ACK
+                if p.seq_num < self.seq_num:
+                    print("##########\nReceived a duplicate packet, sending ACK %d\n" %p.seq_num)
+                    ack = Packet(p.seq_num, '1')
+                    self.network.udt_send(ack.get_byte_S())
+
+                # 新的报文
+                elif p.seq_num == self.seq_num:
+                    ack = Packet(self.seq_num, "1")
+                    print("##########\nReceived the exepcted packet %d\n" % p.seq_num)
+                    print("##########\nsending right ACK %d\n" %p.seq_num)
+                    self.network.udt_send(ack.get_byte_S())
+                    self.seq_num += 1
+
+                ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
+
+            self.byte_buffer = self.byte_buffer[length:]
         
 
 if __name__ == '__main__':

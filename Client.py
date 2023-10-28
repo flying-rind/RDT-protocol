@@ -21,13 +21,13 @@ if __name__ == '__main__':
      
     rdt = RDT.RDT('client', args.server, args.port)
     for msg_S in msg_L:
-        rdt.rdt_2_2_send(msg_S)
+        rdt.rdt_3_0_send(msg_S)
         print('Client Sent msg: '+msg_S+'\n')
        
         # try to receive message before timeout 
         msg_S = None
         while msg_S == None:
-            msg_S = rdt.rdt_2_2_receive()
+            msg_S = rdt.rdt_3_0_receive()
             if msg_S is None:
                 if time_of_last_data + timeout < time.time():
                     break

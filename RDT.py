@@ -68,7 +68,8 @@ class Packet:
 
 class RDT:
     ## latest sequence number used in a packet
-    seq_num = 1
+    seq_num = 0
+    last_seq = 1
     ## buffer of bytes read from network
     byte_buffer = '' 
 
@@ -103,63 +104,56 @@ class RDT:
             self.byte_buffer = self.byte_buffer[length:]
             #if this was the last packet, will return on the next iteration
             
-    def rdt_2_1_send(self, msg_S):
-        # debug
-        # print("in rdt_2_1_send")
-
+    def rdt_2_2_send(self, msg_S):
         # 先创建一个报文并发送
-        p = Packet(self.seq_num, msg_S)
+        send_pkt = Packet(self.seq_num, msg_S)
 
-        cur_seq = self.seq_num
         # 循环直到期望的序号改变
-        while cur_seq == self.seq_num:
+        while True:
             # 无条件发送报文，直到进入下一个状态跳出循环
-            self.network.udt_send(p.get_byte_S())
-            print("##########\nSent a packet, waiting for response\n")
+            self.network.udt_send(send_pkt.get_byte_S())
+            print("##########\nSent a packet %d, waiting for response\n" %self.seq_num)
+
+            self.byte_buffer = ''
+            receive_pkt = ''
+
             # 然后等待接受接收方发过来的ACK或NAK报文（可能有比特差错）
-            received_byte_str = ''
-            while received_byte_str == '':
-                received_byte_str = self.network.udt_receive()
-
+            while receive_pkt == '':
+                receive_pkt = self.network.udt_receive()
             # 接受报文的长度
-            length = int(received_byte_str[:Packet.length_S_length])
-            self.byte_buffer += received_byte_str
-            pRec = Packet.from_byte_S(self.byte_buffer[:length])
+            pkt_length = int(receive_pkt[:Packet.length_S_length])
+            self.byte_buffer = receive_pkt
 
-            # debug
+            pRec = Packet.from_byte_S(self.byte_buffer[:pkt_length])
+
+            # 检查是否出错
             if pRec == None:
                 self.byte_buffer = ''
                 print("##########\nReceived corrupt packet\n")
-
+                continue
             # 没有出错
             else:
-                if pRec.seq_num != self.seq_num:
-                    ack_packet = Packet(pRec.seq_num, "ACK")
+                if pRec.seq_num < self.seq_num:
+                    ack_packet = Packet(pRec.seq_num, "1")
                     print("**********\nSending ACK packet for duplicate packet\n**********\n")
                     self.network.udt_send(ack_packet.get_byte_S())
                 
                 # notcorruot && isACK,则可以进入下一个状态
-                if pRec != None and Packet.isACK(pRec.msg_S):
-                    print("##########\nreceived ACK\n")
-                    self.seq_num = (self.seq_num + 1) % 2
-                
-                elif Packet.isNAK(pRec.msg_S):
-                    self.byte_buffer = ''
-                    print("##########\nreceived NAK\n")
+                if pRec.msg_S == '1':
+                    print("##########\nreceived right ACK, move to next state\n")
+                    self.seq_num += 1
+                    break
+                elif pRec.msg_S == '0':
+                    print("##########\nreceived wrong ACK, resending the packet\n")
+                    continue
 
-
-    def rdt_2_1_receive(self):
-        # debug
-        # print("in rdt_2_1_receive")
+    def rdt_2_2_receive(self):
         ret_S = None
         # 首先接受一个报文,将其存入buffer
         byte_S = self.network.udt_receive()
-
         self.byte_buffer += byte_S
 
-        cur_seq = self.seq_num
-
-        while cur_seq == self.seq_num:
+        while True:
             # 如果没有接受足够长的字节，则返回None
             if(len(self.byte_buffer) < Packet.length_S_length):
                 return ret_S
@@ -174,118 +168,33 @@ class RDT:
             # 接受报文损坏了，发送NAK
             if (p == None):
                 print("##########\nReceived a Corrupt packet,about to respond\n")
-                print("################\nSending NAK\n")
-                pak = Packet(self.seq_num, "NAK")
+                print("################\nSending wrong ACK\n")
+                pak = Packet(self.seq_num, "0")
                 self.network.udt_send(pak.get_byte_S())
-                self.byte_buffer = self.byte_buffer[length:]
 
             else:
                 # 这是send为了处理冗余报文发送的ACK，接收方不管
-                if p.msg_S == 'ACK' or p.msg_S == 'NAK':
-                    print('##########\nReceived a dupilicate packet,ignore\n')
+                if p.msg_S == '0' or p.msg_S == '1':
+                    # print('##########\nReceived a dupilicate ACK packet,ignore\n')
                     self.byte_buffer = self.byte_buffer[length:]
                     continue
-
-                # 如果接受的报文未损坏，且序号正确，为新的报文，发送ACK，跳出循环
-                else:
-                    pak = Packet(self.seq_num, "ACK")
-                    print("##########\nReceived the exepcted packet, about to send ACK\n")
-                    print("##################\nSending ACK\n")
-                    self.network.udt_send(pak.get_byte_S())
-                    self.byte_buffer = self.byte_buffer[length:]
-                    self.seq_num = (self.seq_num + 1) % 2
-                    return p.msg_S
                 
+                # 已经接受过的报文，重发ACK
+                if p.seq_num < self.seq_num:
+                    print("##########\nReceived a duplicate packet, sending ACK\n")
+                    ack = Packet(p.seq_num, '1')
+                    self.network.udt_send(ack.get_byte_S())
+                # 新的报文
+                elif p.seq_num == self.seq_num:
+                    ack = Packet(self.seq_num, "1")
+                    print("##########\nReceived the exepcted packet\n")
+                    print("##########\nsending right ACK\n")
+                    self.network.udt_send(ack.get_byte_S())
+                    self.seq_num += 1
 
-    def rdt_2_2_send(self, msg_S):
-        # 先创建一个报文并发送
-        p = Packet(self.seq_num, msg_S)
+                ret_S = p.msg_S if (ret_S is None) else ret_S + p.msg_S
 
-        cur_seq = self.seq_num
-        # 循环直到期望的序号改变
-        while cur_seq == self.seq_num:
-            # 无条件发送报文，直到进入下一个状态跳出循环
-            self.network.udt_send(p.get_byte_S())
-            print("##########\nSent a packet, waiting for response\n")
-            # 然后等待接受接收方发过来的ACK或NAK报文（可能有比特差错）
-            received_byte_str = ''
-            while received_byte_str == '':
-                received_byte_str = self.network.udt_receive()
-
-            # 接受报文的长度
-            length = int(received_byte_str[:Packet.length_S_length])
-            self.byte_buffer = received_byte_str[length:]
-            pRec = Packet.from_byte_S(self.byte_buffer[:length])
-
-            # debug
-            if pRec == None:
-                self.byte_buffer = ''
-                print("##########\nReceived corrupt packet\n")
-
-            # 没有出错
-            else:
-                if pRec.seq_num != self.seq_num:
-                    ack_packet = Packet(pRec.seq_num, "ACK")
-                    print("**********\nSending ACK packet for duplicate packet\n**********\n")
-                    self.network.udt_send(ack_packet.get_byte_S())
-                
-                # notcorruot && isACK && seq_num匹配,则可以进入下一个状态
-                if pRec != None and Packet.isACK(pRec.msg_S) and pRec.seq_num == self.seq_num:
-                    print("##########\nreceived ACK\n")
-                    self.seq_num = (self.seq_num + 1) % 2
-                
-                # 收到ACK，但是序号不匹配
-                else:
-                    self.byte_buffer = ''
-                    print("##########\nreceived duplicate ACK\n")
-
-
-    def rdt_2_2_receive(self):
-        ret_S = None
-        # 首先接受一个报文,将其存入buffer
-        byte_S = self.network.udt_receive()
-
-        self.byte_buffer += byte_S
-
-        cur_seq = self.seq_num
-
-        while cur_seq == self.seq_num:
-            # 如果没有接受足够长的字节，则返回None
-            if(len(self.byte_buffer) < Packet.length_S_length):
-                return ret_S
-            
-            length = int(self.byte_buffer[:Packet.length_S_length])
-            if len(self.byte_buffer) < length:
-                return ret_S
-            
-            # 获取接受报文，如果接受报文有错，则p为None
-            p = Packet.from_byte_S(self.byte_buffer[0:length])
-
-            # 接受报文损坏了，发送ACK,但是序号不更新
-            if (p == None):
-                print("##########\nReceived a Corrupt packet,about to respond\n")
-                print("################\nSending a ACK which was sent before\n")
-                pak = Packet(self.seq_num, "ACK")
-                self.network.udt_send(pak.get_byte_S())
-                self.byte_buffer = self.byte_buffer[length:]
-
-            else:
-                # 这是send为了处理冗余报文发送的ACK，接收方相应
-                if p.msg_S == 'ACK' or p.msg_S == 'NAK':
-                    print('##########\nReceived a dupilicate packet,ignore\n')
-                    self.byte_buffer = self.byte_buffer[length:]
-                    continue
-
-                # 如果接受的报文未损坏，且序号正确，为新的报文，发送ACK，更新序号
-                else:
-                    pak = Packet(self.seq_num, "ACK")
-                    print("##########\nReceived the exepcted packet, about to send ACK\n")
-                    print("##################\nSending ACK\n")
-                    self.network.udt_send(pak.get_byte_S())
-                    self.byte_buffer = self.byte_buffer[length:]
-                    self.seq_num = (self.seq_num + 1) % 2
-                    return p.msg_S
-            
+            self.byte_buffer = self.byte_buffer[length:]
 
     def rdt_3_0_send(self, msg_S):
         pass
@@ -314,8 +223,3 @@ if __name__ == '__main__':
         print(rdt.rdt_1_0_receive())
         rdt.rdt_1_0_send('MSG_FROM_SERVER')
         rdt.disconnect()
-        
-
-
-        
-        

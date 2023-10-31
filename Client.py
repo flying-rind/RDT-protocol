@@ -16,7 +16,7 @@ if __name__ == '__main__':
         'message4: artificial itelligence'
     ]
      
-    timeout = 2 #send the next message if no response
+    timeout = 10 #send the next message if no response
     time_of_last_data = time.time()
      
     rdt = RDT.RDT('client', args.server, args.port)
@@ -38,5 +38,7 @@ if __name__ == '__main__':
         #print the result
         if msg_S:
             print('Client Received msg: '+msg_S+'\n')
-        
+
+    # time.sleep(5)
+
     rdt.disconnect()

@@ -13,12 +13,10 @@ while True:
     msg_S = receiver.rdt_receive()
     if msg_S == None:
         if time.time() - time_of_last_data > timeout:
+            print("timeout")
             break
         else:
             continue
-    # debug
-    if msg_S != None:
-        print('Received msg %s' % msg_S)
 
     time_of_last_data = time.time()
     new_file.write(msg_S.encode('utf-8'))

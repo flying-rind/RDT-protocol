@@ -16,8 +16,8 @@ import RDT
 '''
 class NetworkLayer:
     # 丢包率和出错率
-    prob_pkt_loss = 0
-    prob_byte_corr = 0
+    prob_pkt_loss = 0.2
+    prob_byte_corr = 0.2
 
     # 套接字
     sock = None

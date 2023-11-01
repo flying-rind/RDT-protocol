@@ -28,8 +28,11 @@ class NetworkLayer:
     buffer_S = ''
     lock = threading.Lock()
     # STOP信号
-    stop = False
+    stop = None
     collect_thread = None
+
+    # 设置socket超时
+    socket_timeout = 0.1
 
     def __init__(self, role, server_port, client_port):
         self.role = role
@@ -37,26 +40,30 @@ class NetworkLayer:
             print('Network: role is client')
             # 创建UDP套接字
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock.bind(('localhost', client_port))
-            self.client_address = ('localhost', client_port)
+            self.sock.bind(('127.0.0.1', client_port))
         elif role == 'server':
             print('Network: role is server')
             # 创建UDP套接字
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             # 绑到本地IP和指定端口
-            self.sock.bind(('localhost', server_port))
-            self.server_address = ('localhost', server_port)
-
+            self.sock.bind(('127.0.0.1', server_port))
+        # 设置最大超时
+        self.sock.settimeout(self.socket_timeout)
+        self.server_address = ('127.0.0.1', server_port)
+        self.client_address = ('127.0.0.1', client_port)
         # 启动线程不断地收集数据放入缓冲区
-        self.collect_threads = threading.Thread(name = 'Collector', target=self.collect)
+        self.collect_thread = threading.Thread(name = 'Collector', target=self.collect)
+        self.collect_thread.start()
 
     '''
     回收线程
     '''
     def disconnect(self):
-        if self.collect_thread:
-            self.stop = True
-            self.collect_thread.join()
+        self.stop = True
+        self.collect_thread.join()
+        # debug
+        print('closing socket connection')
+        self.sock.close()
 
     '''
     udt_send
@@ -68,7 +75,7 @@ class NetworkLayer:
         if random.random() < self.prob_pkt_loss:
             return
         
-        # 模拟比特错误,在已经打包好的rdt报文中随机插入一定数量的XXX
+        # 模拟比特错误,在已经打包好的rdt报文中将一定数量的字符改为XXX
         if random.random() < self.prob_byte_corr:
             # 保证长度字节不会发生错误
             start = random.randint(RDT.Packet.length_S_length, len(msg_S)-5)
@@ -94,22 +101,26 @@ class NetworkLayer:
     发送方和接收方的网络层都创建一个线程来不断地接受字节并放入自己的缓存区
     '''
     def collect(self):
-        while True:
+        while(True):
+            if self.stop == True:
+                print (threading.currentThread().getName() + ': Ending')
+                return
             try:
                 recv_bytes = self.sock.recvfrom(2048)[0]
                 with self.lock:
                     self.buffer_S += recv_bytes.decode('utf-8')
-            except:
+            # you may need to uncomment the BlockingIOError handling on Windows machines
+            except BlockingIOError as err:
                 pass
-            if self.stop:
-                return
+            except socket.timeout as err:
+                pass
 
     '''
     udt_receive
     将缓存区中的所有内容取出提交
     '''
     def udt_receive(self):
-        while self.lock:
+        with self.lock:
             ret_S = self.buffer_S
             self.buffer_S = ''
         return ret_S

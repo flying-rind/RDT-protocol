@@ -19,7 +19,7 @@ class Packet:
     '''
     创建一个报文时,给定其序号和消息内容
     '''
-    def __init__(self, seq_num, msg_S):
+    def __init__(self, seq_num, msg_S:str):
         self.seq_num = seq_num
         self.msg_S = msg_S
 
@@ -32,41 +32,42 @@ class Packet:
             return None
         # 取出序号字段
         seq_num = int(byte_S[Packet.length_S_length: Packet.length_S_length + Packet.seq_length])
-        msg_S = byte_S(Packet.length_S_length + Packet.seq_length + Packet.checksum_length)
+        msg_S = byte_S[Packet.length_S_length+Packet.seq_length+Packet.checksum_length :]
         return cls(seq_num, msg_S)
 
     '''
     给定报文各个字段的值,封装报文为字节串,以便发送
     '''
     def get_byte_S(self):
-        # 序号字段的字节串
+        #convert sequence number of a byte field of seq_num_S_length bytes
         seq_num_S = str(self.seq_num).zfill(self.seq_length)
-        # 长度字段的字节串
+        #convert length to a byte field of length_S_length bytes
         length_S = str(self.length_S_length + len(seq_num_S) + self.checksum_length + len(self.msg_S)).zfill(self.length_S_length)
-        # checksum字段的字节串
-        checksum = hashlib.md5((length_S + seq_num_S + self.msg_S).encode('utf8'))
+
+        # debug
+        # print(type(seq_num_S), type(length_S), type(self.msg_S))
+
+        #compute the checksum
+        checksum = hashlib.md5((length_S+seq_num_S+self.msg_S).encode('utf-8'))
         checksum_S = checksum.hexdigest()
-
-        # 将各个字段拼接起来,得到一个字节串
-        byte_S = length_S + seq_num_S + checksum_S + self.msg_S
-
-        return byte_S
+        #compile into a string
+        return length_S + seq_num_S + checksum_S + self.msg_S
     
     '''
     给定字节串,检查校验码以确定是否损坏
     '''
     @staticmethod
     def corrupt(byte_S):
-        # 先提取出各个字段
+        # 提取报文各个字段
         length_S = byte_S[0:Packet.length_S_length]
         seq_num_S = byte_S[Packet.length_S_length : Packet.seq_length+Packet.seq_length]
         checksum_S = byte_S[Packet.seq_length+Packet.seq_length : Packet.seq_length+Packet.length_S_length+Packet.checksum_length]
         msg_S = byte_S[Packet.seq_length+Packet.seq_length+Packet.checksum_length :]
-
-        checksum = hashlib.md5(str(length_S + seq_num_S + msg_S).encode('utf-8'))
-        coputed_checksum_S = checksum.hexdigest()
-        # 检查是否相同
-        return checksum != coputed_checksum_S
+        
+        # 计算得到报文的校验和
+        checksum = hashlib.md5(str(length_S+seq_num_S+msg_S).encode('utf-8'))
+        computed_checksum_S = checksum.hexdigest()
+        return checksum_S != computed_checksum_S
                        
 
 '''
@@ -81,14 +82,14 @@ class Sender:
     # 从网络层读取的字节的缓冲区
     byte_buffer = ''
 
-    def __init__(self, role, port):
+    def __init__(self, role, server_port, client_port):
         # 为发送发创建一个网络层
-        self.network = Network.NetworkLayer(role, port)
+        self.network = Network.NetworkLayer(role, server_port, client_port)
 
     def disconnect(self):
         self.network.disconnect()
 
-    def rdt_send(self, msg_S):
+    def rdt_send(self, msg_S:str):
         p = Packet(self.seq_num, msg_S)
         self.seq_num += 1
         self.network.udt_send(p.get_byte_S())
@@ -103,9 +104,9 @@ class Receiver:
     # 从网络层读取的字节的缓冲区
     byte_buffer = ''
 
-    def __init__(self, role, port):
+    def __init__(self, role, server_port, client_port):
         # 为发送发创建一个网络层
-        self.network = Network.NetworkLayer(role, port)
+        self.network = Network.NetworkLayer(role, server_port, client_port)
 
     def disconnect(self):
         self.network.disconnect()

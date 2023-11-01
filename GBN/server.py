@@ -1,39 +1,30 @@
-from socket import *
-import struct
+import RDT
+import time
 
-server = socket(AF_INET,SOCK_DGRAM)
-server_addr=('127.0.0.1',8080)
-server.bind(server_addr)
+receiver = RDT.Receiver('server', 8080, 8090)
 
-#解析文件信息
-fileinfo_size = struct.calcsize('128sl')
-fileinfo_pack=server.recvfrom(fileinfo_size)
-#print(fileinfo_pack)
-filename,filesize=struct.unpack('128sl',fileinfo_pack[0])
-#除去多余字符
-filename=filename.strip(b'\00')
-filename=filename.decode()
-# print(filename)
-# server.close()
-count=0
-#已接收文件大小：
-receive_size = 0
-#创建本地文件：
-fp = open('./'+'receive_'+str(filename),'wb')
-#写入内容：
-while receive_size!=filesize:
-    if filesize-receive_size>1024:
-        count+=1
-        pack=server.recvfrom(1024)[0]
-        receive_size+=len(pack)
-        #print("received number %d packes"%count)
-    else:
-        count+=1
-        pack=server.recvfrom(filesize-receive_size)[0]
-        receive_size=filesize
-        #print("received number %d packes"%count)
-    print("received number %d bytes"%receive_size)
-    fp.write(pack)
-fp.close()
-print('end receive:')
-server.close()
+new_file_name = 'receive_article.txt'
+new_file = open(new_file_name, 'wb')
+timeout = 5
+
+# 写入内容
+time_of_last_data = time.time()
+while True:
+    msg_S = receiver.rdt_receive()
+    if msg_S == None:
+        if time.time() - time_of_last_data > timeout:
+            break
+        else:
+            continue
+    # debug
+    if msg_S != None:
+        print('Received msg %s' % msg_S)
+
+    time_of_last_data = time.time()
+    new_file.write(msg_S.encode('utf-8'))
+
+new_file.close()
+print('Server ended')
+receiver.disconnect()
+
+    
